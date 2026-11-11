@@ -16,10 +16,70 @@
   const hasScheme = u => /^[a-z][a-z0-9+.-]*:\/\//i.test(u);
   const minifyJson = s => { try { return JSON.stringify(JSON.parse(s)); } catch (e) { return null; } };
 
+  // Copies a JSON string literal starting at s[i]; returns the index after its closing quote.
+  const skipString = (s, i) => { let j = i + 1; while (j < s.length && s[j] !== '"') j += s[j] === '\\' ? 2 : 1; return j + 1; };
+
+  // Removes // and /* */ comments from JSON text, plus the trailing commas that commented-out lines leave.
+  // Text inside strings is kept. Returns null when there are no comments.
+  function stripJsonComments(s) {
+    let out = '', i = 0, found = false;
+    const atLineStart = () => /(^|\n)[ \t]*$/.test(out);
+    const dropLine = k => { // the comment had the line to itself: remove the whole line
+      while (s[k] === ' ' || s[k] === '\t' || s[k] === '\r') k++;
+      if (atLineStart() && (s[k] === '\n' || k >= s.length)) { out = out.replace(/[ \t]+$/, ''); return k + 1; }
+      return null;
+    };
+    while (i < s.length) {
+      const c = s[i];
+      if (c === '"') { const j = skipString(s, i); out += s.slice(i, j); i = j; continue; }
+      if (c === '/' && s[i + 1] === '/') {
+        found = true;
+        let e = s.indexOf('\n', i);
+        if (e < 0) e = s.length;
+        const k = dropLine(e);
+        i = k == null ? e : k;
+        continue;
+      }
+      if (c === '/' && s[i + 1] === '*') {
+        const e = s.indexOf('*/', i + 2);
+        if (e < 0) return null;
+        found = true;
+        const k = dropLine(e + 2);
+        i = k == null ? e + 2 : k;
+        continue;
+      }
+      out += c; i++;
+    }
+    if (!found) return null;
+    let res = '';
+    for (let j = 0; j < out.length; j++) {
+      if (out[j] === '"') { const e = skipString(out, j); res += out.slice(j, e); j = e - 1; continue; }
+      if (out[j] === ',' && /^\s*[}\]]/.test(out.slice(j + 1))) continue;
+      res += out[j];
+    }
+    // Spaces a comment leaves at a line end; valid JSON has no raw line breaks inside strings, so this is safe.
+    return res.replace(/[ \t]+(?=\r?\n|$)/g, '');
+  }
+
+  // JSON bodies pasted from docs often carry comments; servers reject them, so take them out before converting.
+  function cleanJsonBodies(r) {
+    for (const p of r.data) {
+      if (p.kind === 'urlencode' || !/^\s*[{[]/.test(p.value)) continue; // also skips @file references
+      const clean = stripJsonComments(p.value);
+      if (clean == null) continue;
+      if (minifyJson(clean) == null) {
+        r.warnings.push('The body has comments but is not valid JSON even without them, so it was left as is.');
+        continue;
+      }
+      p.value = clean;
+      r.notes.push('Removed comments from the JSON body.');
+    }
+  }
+
   function newReq() {
     return { url: '', method: '', headers: [], data: [], form: [], user: null, json: false,
       insecure: false, location: false, maxRedirs: null, head: false, get: false, output: null,
-      uploadFile: null, proxy: null, maxTime: null, connectTimeout: null, flags: [], extra: [], warnings: [] };
+      uploadFile: null, proxy: null, maxTime: null, connectTimeout: null, flags: [], extra: [], warnings: [], notes: [] };
   }
 
   // ---------- curl options ----------
@@ -1162,7 +1222,9 @@
     let r;
     if (d === 'powershell') r = parsePowerShell(src, warnings);
     else r = parseCurlArgs(d === 'cmd' ? tokenizeCmd(src, warnings) : tokenizeBash(src, warnings), newReq());
+    cleanJsonBodies(r);
     r.warnings = [...new Set(warnings.concat(r.warnings))];
+    r.notes = [...new Set(r.notes)];
     return { req: r, dialect: d };
   }
 

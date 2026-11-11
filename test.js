@@ -70,6 +70,21 @@ const canon = sm => ({
   assert.equal(hdr(sm, 'x-note'), 'it\'s "quoted" & 100% ^up $HOME `tick` \\back');
   assert.equal(sm.body.text, 'line1 it\'s "q" & 100% ^ $HOME `t` \\x\\ é\nline2');
 }
+// comments in JSON bodies are removed before converting; // inside strings stays
+{
+  const { req } = ex('json-comments');
+  assert.equal(req.data[0].value, '{\n  "theme": "dark",\n  "homepage": "https://example.com/start",\n  "retries": 3\n}');
+  assert.deepEqual(req.notes, ['Removed comments from the JSON body.']);
+  const q = C.parse(String.raw`curl -d '{"a":"say \"/*hi*/\" // ok", /* x */ "b":[1,2,/* 3 */]}' https://h`).req;
+  assert.deepEqual(JSON.parse(q.data[0].value), { a: 'say "/*hi*/" // ok', b: [1, 2] });
+  const ps = C.parse("Invoke-RestMethod https://h -Method Post -ContentType 'application/json' -Body @'\n{\n  \"a\": 1 // one\n}\n'@").req;
+  assert.equal(ps.data[0].value, '{\n  "a": 1\n}');
+  assert.equal(C.parse("curl -d 'a=1//b' https://h").req.data[0].value, 'a=1//b');           // not JSON: untouched
+  assert.equal(C.parse("curl -d '{\"a\":1}' https://h").req.notes.length, 0);               // no comments: no note
+  const bad = C.parse("curl -d '{a: 1 // x\n}' https://h").req;                              // still invalid: untouched
+  assert.equal(bad.data[0].value, '{a: 1 // x\n}');
+  assert.ok(bad.warnings.some(w => /not valid JSON/.test(w)));
+}
 // small cases
 assert.deepEqual(C.crtSplit('a "b c" d\\"e "f\\\\" "g""h"'), ['a', 'b c', 'd"e', 'f\\', 'g"h']);
 assert.equal(C.summary(C.parse("curl -sSLXPUT -d@x.json example.com").req).method, 'PUT');

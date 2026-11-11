@@ -59,6 +59,18 @@ Invoke-WebRequest -UseBasicParsing -Uri "https://app.example.com/api/search" ` +
     code: String.raw`curl.exe -X PATCH "https://api.example.com/items/42" -H "Content-Type: application/json" -d '{\"status\":\"done\"}'`,
   },
   {
+    id: 'json-comments', label: 'JSON body with comments (bash)', dialect: 'bash',
+    code: String.raw`curl -X PUT 'https://api.example.com/v1/settings' \
+  -H 'Content-Type: application/json' \
+  -d '{
+  // display options
+  "theme": "dark", /* or "light" */
+  "homepage": "https://example.com/start", // the // inside the URL stays
+  "retries": 3,
+  // "debug": true,
+}'`,
+  },
+  {
     id: 'tricky', label: 'Tricky characters (bash)', dialect: 'bash',
     code: String.raw`curl 'https://api.example.com/echo?q=caf%C3%A9&x=1&y=$z' \
   -H 'X-Note: it'\''s "quoted" & 100% ^up $HOME ` + '`tick`' + String.raw` \back' \

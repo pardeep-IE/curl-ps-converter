@@ -226,6 +226,7 @@
     $('copy').disabled = false;
     $('code').textContent = out.code;
     for (const w of parsed.req.warnings) addNote(w, 'warn');
+    for (const n of parsed.req.notes) addNote(n, '');
     for (const n of out.notes) addNote(n, '');
     renderSummary(CurlConv.summary(parsed.req));
     $('summary').hidden = false;

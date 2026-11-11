@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Convert curl commands to PowerShell (Invoke-RestMethod, Invoke-WebRequest, curl.exe) and cmd, and back, with the right quoting for each shell.">
+<title>curl ⇄ PowerShell Converter</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  /* Layout: input pane and output pane side by side, request summary under the output; one column on phones. */
+  :root {
+    --bg: #f3f5f8; --panel: #ffffff; --ink: #1a1f27; --muted: #5a6473; --line: #d9dee6;
+    --code-bg: #eef1f6; --accent: #2d55c8; --accent-ink: #ffffff; --accent-soft: #e3e9fb;
+    --warn: #8a5a00; --warn-bg: #fff4dc; --err: #a32222; --err-bg: #fde8e8;
+    --sans: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+    --mono: "IBM Plex Mono", "Cascadia Mono", Consolas, ui-monospace, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1216; --panel: #171b21; --ink: #e4e8ee; --muted: #98a2b0; --line: #2a313a;
+      --code-bg: #11151a; --accent: #8aa6ff; --accent-ink: #0f1216; --accent-soft: #1f2a45;
+      --warn: #f0c46c; --warn-bg: #2e2614; --err: #ff9c9c; --err-bg: #3a1b1b; color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1216; --panel: #171b21; --ink: #e4e8ee; --muted: #98a2b0; --line: #2a313a;
+    --code-bg: #11151a; --accent: #8aa6ff; --accent-ink: #0f1216; --accent-soft: #1f2a45;
+    --warn: #f0c46c; --warn-bg: #2e2614; --err: #ff9c9c; --err-bg: #3a1b1b; color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0;
+    background: var(--bg); color: var(--ink); font: 15px/1.5 var(--sans);
+    padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 28px 40px;
+  }
+  .wrap { max-width: 1280px; margin: 0 auto; display: grid; gap: 20px; }
+  header { display: grid; gap: 6px; }
+  h1 { font-size: 1.6rem; line-height: 1.2; margin: 0; font-weight: 600; text-wrap: balance; letter-spacing: -0.01em; }
+  h1 .arrow { color: var(--accent); font-weight: 500; }
+  .lede { margin: 0; color: var(--muted); max-width: 70ch; }
+  .grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 20px; align-items: start; }
+  @media (max-width: 960px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+  .pane { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; display: grid; gap: 12px; padding: 16px; min-width: 0; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; }
+  .label { font-size: 0.75rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+  .seg button { font: 500 0.85rem var(--sans); color: var(--muted); background: transparent; border: 0; padding: 5px 10px; cursor: pointer; }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--ink); }
+  select { font: 0.9rem var(--sans); color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 7px; padding: 5px 8px; max-width: 100%; }
+  textarea {
+    width: 100%; min-height: 340px; resize: vertical; font: 0.86rem/1.55 var(--mono); color: var(--ink);
+    background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px; padding: 12px; white-space: pre; overflow: auto; tab-size: 4;
+  }
+  .badge { font: 500 0.8rem var(--sans); color: var(--muted); }
+  .badge b { color: var(--ink); font-weight: 600; }
+  .tabs { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--line); }
+  .tabs button {
+    font: 500 0.88rem var(--sans); color: var(--muted); background: transparent; border: 0; border-bottom: 2px solid transparent;
+    padding: 7px 10px; margin-bottom: -1px; cursor: pointer;
+  }
+  .tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+  .codebox { position: relative; min-width: 0; }
+  pre { margin: 0; font: 0.86rem/1.55 var(--mono); }
+  #code { background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px; padding: 14px; overflow: auto; min-height: 120px; white-space: pre; tab-size: 4; }
+  .copy { font: 600 0.85rem var(--sans); background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 7px; padding: 6px 14px; cursor: pointer; }
+  button:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .notes { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+  .notes li { font-size: 0.88rem; border-radius: 7px; padding: 7px 10px 7px 30px; position: relative; background: var(--accent-soft); }
+  .notes li::before { content: "i"; position: absolute; left: 10px; top: 8px; width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid currentColor; font: 600 9px/11px var(--sans); text-align: center; color: var(--accent); }
+  .notes li.warn { background: var(--warn-bg); color: var(--warn); }
+  .notes li.warn::before { content: "!"; color: var(--warn); }
+  .error { background: var(--err-bg); color: var(--err); border-radius: 8px; padding: 12px 14px; font-size: 0.92rem; }
+  .summary { display: grid; gap: 10px; border-top: 1px solid var(--line); padding-top: 12px; min-width: 0; }
+  .reqline { display: flex; gap: 10px; align-items: baseline; min-width: 0; }
+  .method { font: 600 0.78rem var(--mono); letter-spacing: 0.04em; background: var(--ink); color: var(--panel); border-radius: 5px; padding: 2px 7px; flex: none; }
+  .url { font: 0.86rem var(--mono); overflow-wrap: anywhere; min-width: 0; }
+  .kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 14px; font: 0.82rem/1.5 var(--mono); margin: 0; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; overflow-wrap: anywhere; }
+  #sumBody { background: var(--code-bg); border-radius: 7px; padding: 10px; max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.82rem; }
+  footer { color: var(--muted); font-size: 0.85rem; display: flex; flex-wrap: wrap; gap: 6px 18px; }
+  footer code { font-family: var(--mono); color: var(--ink); background: var(--code-bg); padding: 0 5px; border-radius: 4px; }
+  @media (prefers-reduced-motion: no-preference) { .tabs button, .seg button { transition: background-color .15s, color .15s, border-color .15s; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>curl <span class="arrow">⇄</span> PowerShell Converter</h1>
+    <p class="lede">Paste a request as curl (bash or cmd), curl.exe, Invoke-RestMethod or Invoke-WebRequest, including Chrome's "Copy as" output and Postman snippets. You get the same request back for every shell, with the quoting each one needs.</p>
+  </header>
+
+  <div class="grid">
+    <section class="pane" aria-label="Input">
+      <div class="row">
+        <span class="label" id="srcLabel">Paste a command</span>
+        <select id="examples" aria-label="Load an example"></select>
+      </div>
+      <div class="row">
+        <div class="seg" role="group" aria-label="Input shell" id="dialects">
+          <button type="button" data-d="auto" aria-pressed="true">Auto</button>
+          <button type="button" data-d="bash" aria-pressed="false">Bash</button>
+          <button type="button" data-d="cmd" aria-pressed="false">cmd</button>
+          <button type="button" data-d="powershell" aria-pressed="false">PowerShell</button>
+        </div>
+        <span class="badge" id="detected" aria-live="polite"></span>
+      </div>
+      <textarea id="src" aria-labelledby="srcLabel" spellcheck="false" autocomplete="off" autocapitalize="off" wrap="off"></textarea>
+    </section>
+
+    <section class="pane" aria-label="Output">
+      <div class="tabs" role="tablist" id="tabs"></div>
+      <div class="row">
+        <div class="seg" role="group" aria-label="PowerShell version" id="psver">
+          <button type="button" data-l="0" aria-pressed="true">PowerShell 7.3+</button>
+          <button type="button" data-l="1" aria-pressed="false">Windows PowerShell 5.1</button>
+        </div>
+        <button type="button" class="copy" id="copy">Copy</button>
+      </div>
+      <div class="codebox" role="tabpanel" id="panel">
+        <pre id="code" tabindex="0"></pre>
+        <div class="error" id="error" role="status" hidden></div>
+      </div>
+      <ul class="notes" id="notes"></ul>
+      <div class="summary" id="summary">
+        <span class="label">What gets sent</span>
+        <div class="reqline"><span class="method" id="sumMethod"></span><span class="url" id="sumUrl"></span></div>
+        <dl class="kv" id="sumHeaders"></dl>
+        <pre id="sumBody" hidden></pre>
+      </div>
+    </section>
+  </div>
+
+  <footer>
+    <span>Line continuation: bash <code>\</code> · cmd <code>^</code> · PowerShell <code>`</code></span>
+    <span>On Windows PowerShell 5.1, <code>curl</code> means Invoke-WebRequest; type <code>curl.exe</code></span>
+    <span>Everything runs in your browser; nothing is sent anywhere.</span>
+  </footer>
+</div>
+
+<script src="converter.js"></script>
+<script src="examples.js"></script>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : v; } catch (e) { return d; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* storage blocked */ } },
+  };
+  const NAMES = { bash: 'Bash', cmd: 'cmd', powershell: 'PowerShell' };
+  const TABS = [['bash', 'Bash / zsh'], ['cmd', 'cmd'], ['ps-curl', 'PowerShell curl.exe'], ['ps-irm', 'Invoke-RestMethod'], ['ps-iwr', 'Invoke-WebRequest']];
+  let tab = store.get('cc.tab', 'ps-irm');
+  if (!TABS.some(t => t[0] === tab)) tab = 'ps-irm';
+  let legacy = store.get('cc.legacy', '0') === '1';
+  let dialect = 'auto';
+
+  // tabs
+  for (const [id, label] of TABS) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.setAttribute('role', 'tab'); b.id = 'tab-' + id; b.dataset.t = id; b.textContent = label;
+    b.setAttribute('aria-controls', 'panel');
+    $('tabs').append(b);
+  }
+  $('tabs').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { tab = b.dataset.t; store.set('cc.tab', tab); render(); } });
+  $('tabs').addEventListener('keydown', e => {
+    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+    const i = TABS.findIndex(t => t[0] === tab), n = (i + (e.key === 'ArrowRight' ? 1 : TABS.length - 1)) % TABS.length;
+    tab = TABS[n][0]; store.set('cc.tab', tab); render(); $('tab-' + tab).focus();
+  });
+  $('psver').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { legacy = b.dataset.l === '1'; store.set('cc.legacy', legacy ? '1' : '0'); render(); } });
+  $('dialects').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { dialect = b.dataset.d; render(); } });
+
+  // examples
+  const sel = $('examples');
+  sel.append(new Option('Load an example…', ''));
+  for (const ex of CurlExamples) sel.append(new Option(ex.label, ex.id));
+  sel.addEventListener('change', () => {
+    const ex = CurlExamples.find(x => x.id === sel.value);
+    if (ex) { $('src').value = ex.code; dialect = 'auto'; render(); }
+    sel.value = '';
+  });
+  $('src').value = CurlExamples[0].code;
+
+  let timer;
+  $('src').addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(render, 120); });
+
+  $('copy').addEventListener('click', () => {
+    const text = $('code').textContent, btn = $('copy');
+    const done = msg => { btn.textContent = msg; setTimeout(() => { btn.textContent = 'Copy'; }, 1800); };
+    const select = () => { const r = document.createRange(); r.selectNodeContents($('code')); const s = getSelection(); s.removeAllRanges(); s.addRange(r); done('Selected, press Ctrl+C'); };
+    try { navigator.clipboard.writeText(text).then(() => done('Copied'), select); } catch (e) { select(); }
+  });
+
+  function setPressed(groupId, attr, value) {
+    for (const b of $(groupId).querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset[attr] === value));
+  }
+
+  function render() {
+    for (const b of $('tabs').querySelectorAll('button')) { const on = b.dataset.t === tab; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; }
+    $('panel').setAttribute('aria-labelledby', 'tab-' + tab);
+    setPressed('dialects', 'd', dialect);
+    setPressed('psver', 'l', legacy ? '1' : '0');
+    $('psver').hidden = !tab.startsWith('ps');
+
+    const src = $('src').value;
+    const notes = $('notes');
+    notes.replaceChildren();
+    if (!src.trim()) { showError('Paste a curl, curl.exe, Invoke-RestMethod or Invoke-WebRequest command on the left.'); $('detected').textContent = ''; return; }
+    let parsed, out;
+    try {
+      parsed = CurlConv.parse(src, dialect);
+      out = CurlConv.emit(parsed.req, tab, { legacy });
+    } catch (e) {
+      showError("Couldn't read this command: " + e.message);
+      $('detected').textContent = '';
+      return;
+    }
+    $('detected').innerHTML = (dialect === 'auto' ? 'Detected: ' : 'Reading as: ') + '<b></b>';
+    $('detected').querySelector('b').textContent = NAMES[parsed.dialect];
+    $('error').hidden = true;
+    $('code').hidden = false;
+    $('copy').disabled = false;
+    $('code').textContent = out.code;
+    for (const w of parsed.req.warnings) addNote(w, 'warn');
+    for (const n of out.notes) addNote(n, '');
+    renderSummary(CurlConv.summary(parsed.req));
+    $('summary').hidden = false;
+  }
+  function addNote(text, cls) { const li = document.createElement('li'); li.textContent = text; if (cls) li.className = cls; $('notes').append(li); }
+  function showError(msg) {
+    $('error').textContent = msg; $('error').hidden = false;
+    $('code').hidden = true; $('copy').disabled = true; $('summary').hidden = true;
+  }
+  function renderSummary(s) {
+    $('sumMethod').textContent = s.method;
+    $('sumUrl').textContent = s.url;
+    const dl = $('sumHeaders');
+    dl.replaceChildren();
+    const pair = (k, v) => { const dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = k; dd.textContent = v; dl.append(dt, dd); };
+    for (const [k, v] of s.headers) pair(k, v);
+    if (s.user != null) pair('Login', s.user.split(':')[0] + (s.user.includes(':') ? ' (with password)' : ''));
+    for (const f of s.form) pair('Form ' + f.name, f.file != null ? 'file ' + f.file : f.value);
+    if (s.insecure) pair('Certificates', 'not checked (-k)');
+    if (s.output) pair('Saves to', s.output);
+    const body = $('sumBody');
+    body.hidden = !s.body;
+    if (s.body) body.textContent = s.body.file != null ? 'Body from file: ' + s.body.file : s.body.text;
+  }
+  render();
+})();
+</script>
